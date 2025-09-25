@@ -1,36 +1,13 @@
-name: Build RustDesk Client (Advanced)
+name: Build RustDesk for Windows
 
 on:
   push:
-    tags: ['v*.*.*']
-  release:
-    types: [published]
+    tags: ['v*']
   workflow_dispatch:
-
-env:
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: Windows Server 2025
-            target: x86_64-pc-windows-msvc
-            artifact_name: rustdesk-windows
-            asset_name: RustDesk-Windows.zip
-            
-          - os: ubuntu-latest  
-            target: x86_64-unknown-linux-gnu
-            artifact_name: rustdesk-linux
-            asset_name: RustDesk-Linux.tar.gz
-            
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: rustdesk-macos
-            asset_name: RustDesk-macOS.tar.gz
+    runs-on: windows-latest
 
     steps:
     - name: Checkout code
@@ -38,113 +15,35 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Install system dependencies
-      run: |
-        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-          sudo apt-get update
-          sudo apt-get install -y \
-            libx11-dev libxdo-dev libxrandr-dev libxi-dev \
-            libasound2-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-dev libssl-dev pkg-config cmake ninja-build
-        fi
-
     - name: Setup Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: stable
-        target: ${{ matrix.target }}
-        components: rust-src
+        target: x86_64-pc-windows-msvc
 
-    - name: Cache dependencies
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: './ -> target'
+    - name: Build RustDesk
+      run: cargo build --release --target x86_64-pc-windows-msvc
 
-    - name: Build application
-      run: cargo build --release --target ${{ matrix.target }} --verbose
-
-    - name: Run tests
-      run: cargo test --release --target ${{ matrix.target }} --verbose
-
-    - name: Optimize binary size
+    - name: Create portable package
       run: |
-        if [ "${{ matrix.os }}" != "windows-latest" ]; then
-          strip target/${{ matrix.target }}/release/rustdesk
-        fi
+        # Создаем папку для пакета
+        mkdir rustdesk-portable
+        # Копируем exe файл
+        copy target\x86_64-pc-windows-msvc\release\rustdesk.exe rustdesk-portable\
+        # Создаем конфиг
+        mkdir rustdesk-portable\config
+        echo [options] > rustdesk-portable\config\RustDesk2.toml
+        echo relay-server = "vpnholod2.softether.net:21117" >> rustdesk-portable\config\RustDesk2.toml
+        echo id-server = "vpnholod2.softether.net:21116" >> rustdesk-portable\config\RustDesk2.toml
+        # Создаем BAT файл
+        echo @echo off > rustdesk-portable\start.bat
+        echo rustdesk.exe --id-server vpnholod2.softether.net:21116 --relay-server vpnholod2.softether.net:21117 >> rustdesk-portable\start.bat
+        echo pause >> rustdesk-portable\start.bat
+        # Архивируем
+        7z a -r rustdesk-windows.zip rustdesk-portable\
 
-    - name: Create configuration files
-      run: |
-        # Для Windows
-        if [ "${{ matrix.os }}" = "Windows Server 2025" ]; then
-          mkdir -p "target/${{ matrix.target }}/release/config/RustDesk"
-          echo "[options]" > "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
-          echo "relay-server = \"vpnholod2.softether.net:21117\"" >> "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
-          echo "api-server = \"https://vpnholod2.softether.net:21117\"" >> "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
-          echo "id-server = \"vpnholod2.softether.net:21116\"" >> "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
-          echo "key = \"\"" >> "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
-        
-        # Для Linux и macOS
-        else
-          mkdir -p "target/${{ matrix.target }}/release/config/.config/RustDesk"
-          echo "[options]" > "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml"
-          echo "relay-server = \"vpnholod2.softether.net:21117\"" >> "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml"
-          echo "api-server = \"https://vpnholod2.softether.net:21117\"" >> "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml"
-          echo "id-server = \"vpnholod2.softether.net:21116\"" >> "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml"
-          echo "key = \"3hhFAlNgteYx8cz6k34lXI47jCrz2DSuZ7DcEPD835Q=\"" >> "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml"
-        fi
-
-    - name: Package binary with config
-      run: |
-        mkdir -p release-package
-        
-        if [ "${{ matrix.os }}" = "Windows Server 2025" ]; then
-          # Копируем файлы для Windows
-          cp target/${{ matrix.target }}/release/rustdesk.exe release-package/
-          cp -r target/${{ matrix.target }}/release/config release-package/
-          
-          # Создаем BAT файл
-          echo "@echo off" > release-package/start.bat
-          echo "chcp 65001 > nul" >> release-package/start.bat
-          echo "echo Starting RustDesk with custom server..." >> release-package/start.bat
-          echo "rustdesk.exe --id-server vpnholod2.softether.net:21116 --relay-server vpnholod2.softether.net:21117" >> release-package/start.bat
-          echo "pause" >> release-package/start.bat
-          
-          cd release-package && zip -r ../${{ matrix.asset_name }} ./*
-          
-        else
-          # Копируем файлы для Linux/macOS
-          cp target/${{ matrix.target }}/release/rustdesk release-package/
-          cp -r target/${{ matrix.target }}/release/config release-package/
-          
-          # Создаем shell script
-          echo "#!/bin/bash" > release-package/start.sh
-          echo "echo \"Starting RustDesk with custom server...\"" >> release-package/start.sh
-          echo "./rustdesk --id-server vpnholod2.softether.net:21116 --relay-server vpnholod2.softether.net:21117" >> release-package/start.sh
-          chmod +x release-package/start.sh
-          
-          cd release-package && tar -czf ../${{ matrix.asset_name }} ./*
-        fi
-
-    - name: Upload artifact
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.artifact_name }}-${{ github.sha }}
-        path: ${{ matrix.asset_name }}
-        retention-days: 90
-
-    - name: Upload to release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ${{ matrix.asset_name }}
-        draft: false
-        prerelease: false
-
-  notify:
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Notify build status
-        run: |
-          echo "Build completed with status: ${{ needs.build.result }}"
+        name: rustdesk-windows
+        path: rustdesk-windows.zip
