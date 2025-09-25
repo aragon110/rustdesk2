@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
+          - os: Windows Server 2025
             target: x86_64-pc-windows-msvc
             artifact_name: rustdesk-windows
             asset_name: RustDesk-Windows.zip
@@ -75,7 +75,7 @@ jobs:
     - name: Create configuration files
       run: |
         # Для Windows
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+        if [ "${{ matrix.os }}" = "Windows Server 2025" ]; then
           mkdir -p "target/${{ matrix.target }}/release/config/RustDesk"
           echo "[options]" > "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
           echo "relay-server = \"vpnholod2.softether.net:21117\"" >> "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml"
@@ -97,7 +97,7 @@ jobs:
       run: |
         mkdir -p release-package
         
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+        if [ "${{ matrix.os }}" = "Windows Server 2025" ]; then
           # Копируем файлы для Windows
           cp target/${{ matrix.target }}/release/rustdesk.exe release-package/
           cp -r target/${{ matrix.target }}/release/config release-package/
