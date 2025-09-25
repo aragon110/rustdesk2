@@ -1,0 +1,134 @@
+name: Build RustDesk Client (Advanced)
+
+on:
+  push:
+    tags: ['v*.*.*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: rustdesk-windows
+            asset_name: RustDesk-Windows.zip
+            
+          - os: ubuntu-latest  
+            target: x86_64-unknown-linux-gnu
+            artifact_name: rustdesk-linux
+            asset_name: RustDesk-Linux.tar.gz
+            
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: rustdesk-macos
+            asset_name: RustDesk-macOS.tar.gz
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install system dependencies
+      run: |
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxdo-dev libxrandr-dev libxi-dev \
+            libasound2-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev pkg-config cmake ninja-build
+        elif [ "${{ matrix.os }}" = "windows-latest" ]; then
+          # Установка Visual Studio Build Tools для Windows
+          echo "VS Build Tools установлены автоматически"
+        fi
+
+    - name: Setup Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        components: rust-src
+
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: './ -> target'
+
+    - name: Build application
+      run: cargo build --release --target ${{ matrix.target }} --verbose
+
+    - name: Run tests
+      run: cargo test --release --target ${{ matrix.target }} --verbose
+
+    - name: Optimize binary size
+      run: |
+        if [ "${{ matrix.os }}" != "windows-latest" ]; then
+          strip target/${{ matrix.target }}/release/rustdesk
+        fi
+
+    - name: Package binary
+      run: |
+        mkdir -p release
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          cp target/${{ matrix.target }}/release/rustdesk.exe release/
+          cd release && zip -r ../${{ matrix.asset_name }} ./*
+        else
+          cp target/${{ matrix.target }}/release/rustdesk release/
+          cd release && tar -czf ../${{ matrix.asset_name }} ./*
+        fi
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.artifact_name }}-${{ github.sha }}
+        path: ${{ matrix.asset_name }}
+        retention-days: 90
+
+    - name: Upload to release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ matrix.asset_name }}
+        draft: false
+        prerelease: false
+
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify build status
+        run: |
+          echo "Build completed with status: ${{ needs.build.result }}"
+		  
+    - name: Configure for custom server
+      run: |
+        # Создаем базовый конфиг файл
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          echo "Creating Windows config..."
+          mkdir -p "config/RustDesk"
+          cat > "config/RustDesk/RustDesk2.toml" << EOF
+[options]
+relay-server = "vpnholod2.softether.net:21117"
+api-server = "https://vpnholod2.softether.net:21117"
+key = ""
+EOF
+        else
+          echo "Creating Unix config..."
+          mkdir -p "config/.config/RustDesk"
+          cat > "config/.config/RustDesk/RustDesk2.toml" << EOF
+[options]
+relay-server = "vpnholod2.softether.net:21117"
+api-server = "https://vpnholod2.softether.net:21117"
+key = "3hhFAlNgteYx8cz6k34lXI47jCrz2DSuZ7DcEPD835Q="
+EOF
+        fi
