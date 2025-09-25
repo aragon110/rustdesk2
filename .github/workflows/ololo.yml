@@ -110,8 +110,8 @@ jobs:
         run: |
           echo "Build completed with status: ${{ needs.build.result }}"
 		  
-    - name: Configure for custom server
-      run: |
+   	  - name: Configure for custom server
+     	run: |
         # Создаем базовый конфиг файл
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
           echo "Creating Windows config..."
