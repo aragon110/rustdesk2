@@ -47,7 +47,6 @@ jobs:
             libasound2-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libssl-dev pkg-config cmake ninja-build
         elif [ "${{ matrix.os }}" = "windows-latest" ]; then
-          # Установка Visual Studio Build Tools для Windows
           echo "VS Build Tools установлены автоматически"
         fi
 
@@ -75,19 +74,73 @@ jobs:
           strip target/${{ matrix.target }}/release/rustdesk
         fi
 
-    - name: Package binary
+    - name: Configure for custom server
       run: |
-        mkdir -p release
+        # Создаем конфиг файлы для каждого типа ОС
         if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          cp target/${{ matrix.target }}/release/rustdesk.exe release/
-          cd release && zip -r ../${{ matrix.asset_name }} ./*
+          echo "Creating Windows config..."
+          mkdir -p "target/${{ matrix.target }}/release/config/RustDesk"
+          cat > "target/${{ matrix.target }}/release/config/RustDesk/RustDesk2.toml" << 'EOF'
+[options]
+relay-server = "vpnholod2.softether.net:21117"
+api-server = "https://vpnholod2.softether.net:21117"
+id-server = "vpnholod2.softether.net:21116"
+key = ""
+EOF
+        elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          echo "Creating Linux config..."
+          mkdir -p "target/${{ matrix.target }}/release/config/.config/RustDesk"
+          cat > "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml" << 'EOF'
+[options]
+relay-server = "vpnholod2.softether.net:21117"
+api-server = "https://vpnholod2.softether.net:21117"
+id-server = "vpnholod2.softether.net:21116"
+key = "3hhFAlNgteYx8cz6k34lXI47jCrz2DSuZ7DcEPD835Q="
+EOF
         else
-          cp target/${{ matrix.target }}/release/rustdesk release/
-          cd release && tar -czf ../${{ matrix.asset_name }} ./*
+          echo "Creating macOS config..."
+          mkdir -p "target/${{ matrix.target }}/release/config/.config/RustDesk"
+          cat > "target/${{ matrix.target }}/release/config/.config/RustDesk/RustDesk2.toml" << 'EOF'
+[options]
+relay-server = "vpnholod2.softether.net:21117"
+api-server = "https://vpnholod2.softether.net:21117"
+id-server = "vpnholod2.softether.net:21116"
+key = "3hhFAlNgteYx8cz6k34lXI47jCrz2DSuZ7DcEPD835Q="
+EOF
+        fi
+
+    - name: Package binary with config
+      run: |
+        mkdir -p release-package
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          # Копируем бинарник и конфиг
+          cp target/${{ matrix.target }}/release/rustdesk.exe release-package/
+          cp -r target/${{ matrix.target }}/release/config release-package/
+          # Создаем BAT файл для запуска
+          cat > release-package/start.bat << 'EOF'
+@echo off
+chcp 65001 > nul
+echo Starting RustDesk with custom server...
+rustdesk.exe --id-server vpnholod2.softether.net:21116 --relay-server vpnholod2.softether.net:21117
+pause
+EOF
+          cd release-package && zip -r ../${{ matrix.asset_name }} ./*
+        else
+          # Копируем бинарник и конфиг
+          cp target/${{ matrix.target }}/release/rustdesk release-package/
+          cp -r target/${{ matrix.target }}/release/config release-package/
+          # Создаем скрипт для запуска
+          cat > release-package/start.sh << 'EOF'
+#!/bin/bash
+echo "Starting RustDesk with custom server..."
+./rustdesk --id-server vpnholod2.softether.net:21116 --relay-server vpnholod2.softether.net:21117
+EOF
+          chmod +x release-package/start.sh
+          cd release-package && tar -czf ../${{ matrix.asset_name }} ./*
         fi
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact_name }}-${{ github.sha }}
         path: ${{ matrix.asset_name }}
@@ -109,26 +162,3 @@ jobs:
       - name: Notify build status
         run: |
           echo "Build completed with status: ${{ needs.build.result }}"
-		  
-   	  - name: Configure for custom server
-     	run: |
-        # Создаем базовый конфиг файл
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          echo "Creating Windows config..."
-          mkdir -p "config/RustDesk"
-          cat > "config/RustDesk/RustDesk2.toml" << EOF
-[options]
-relay-server = "vpnholod2.softether.net:21117"
-api-server = "https://vpnholod2.softether.net:21117"
-key = ""
-EOF
-        else
-          echo "Creating Unix config..."
-          mkdir -p "config/.config/RustDesk"
-          cat > "config/.config/RustDesk/RustDesk2.toml" << EOF
-[options]
-relay-server = "vpnholod2.softether.net:21117"
-api-server = "https://vpnholod2.softether.net:21117"
-key = "3hhFAlNgteYx8cz6k34lXI47jCrz2DSuZ7DcEPD835Q="
-EOF
-        fi
